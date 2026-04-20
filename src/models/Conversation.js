@@ -26,7 +26,6 @@ const conversationSchema = new mongoose.Schema(
     },
     groupUsername: {
       type: String,
-      default: null,
       trim: true,
       lowercase: true,
       maxlength: 30,
