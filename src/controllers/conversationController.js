@@ -128,7 +128,17 @@ const deleteConversation = async (req, res) => {
 // POST /api/conversations/group — create a group conversation
 const createGroupConversation = async (req, res) => {
   try {
-    const { groupName, groupUsername, participantIds } = req.body;
+    let { groupName, groupUsername, participantIds } = req.body;
+
+    // Handle participantIds if sent as stringified JSON (from FormData)
+    if (typeof participantIds === 'string') {
+      try {
+        participantIds = JSON.parse(participantIds);
+      } catch (err) {
+        participantIds = null;
+      }
+    }
+
     if (!groupName || !groupUsername || !participantIds || !Array.isArray(participantIds) || participantIds.length < 1) {
       return res.status(400).json({ message: 'Valid groupName, groupUsername, and at least one participant required' });
     }
