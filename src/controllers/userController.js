@@ -26,7 +26,7 @@ const searchUsers = async (req, res) => {
 const getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select(
-      'username displayName avatar bio isOnline lastSeen interests'
+      'username displayName avatar bio isOnline lastSeen interests createdAt'
     );
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
@@ -38,11 +38,22 @@ const getUserById = async (req, res) => {
 // PUT /api/users/profile
 const updateProfile = async (req, res) => {
   try {
-    const { displayName, bio, interests, coverPhoto, statusEmoji } = req.body;
+    const { displayName, firstName, lastName, bio, interests, coverPhoto, statusEmoji } = req.body;
     const userId = req.user._id;
     
     const updateData = {};
-    if (displayName !== undefined) updateData.displayName = displayName.trim();
+    if (firstName !== undefined) updateData.firstName = firstName.trim();
+    if (lastName !== undefined) updateData.lastName = lastName.trim();
+
+    // If first or last name is updated, also update displayName
+    if (firstName !== undefined || lastName !== undefined) {
+      const user = await User.findById(userId);
+      const fName = firstName !== undefined ? firstName.trim() : (user.firstName || '');
+      const lName = lastName !== undefined ? lastName.trim() : (user.lastName || '');
+      updateData.displayName = `${fName} ${lName}`.trim();
+    } else if (displayName !== undefined) {
+      updateData.displayName = displayName.trim();
+    }
     if (bio !== undefined) updateData.bio = bio.trim();
     if (interests !== undefined && Array.isArray(interests)) updateData.interests = interests;
     if (coverPhoto !== undefined) updateData.coverPhoto = coverPhoto;

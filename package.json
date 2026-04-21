@@ -1,7 +1,7 @@
 {
-  "name": "chattrix-backend",
+  "name": "nexchat-backend",
   "version": "1.0.0",
-  "description": "Chattrix real-time messaging backend",
+  "description": "NexChat real-time messaging backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

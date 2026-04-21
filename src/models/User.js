@@ -32,6 +32,18 @@ const userSchema = new mongoose.Schema(
       maxlength: [50, 'Display name too long'],
       default: '',
     },
+    firstName: {
+      type: String,
+      trim: true,
+      maxlength: [30, 'First name too long'],
+      default: '',
+    },
+    lastName: {
+      type: String,
+      trim: true,
+      maxlength: [30, 'Last name too long'],
+      default: '',
+    },
     bio: {
       type: String,
       maxlength: [200, 'Bio too long'],

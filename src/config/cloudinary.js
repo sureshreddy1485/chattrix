@@ -12,7 +12,7 @@ cloudinary.config({
 const chatImageStorage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder: 'chattrix/messages',
+    folder: 'nexchat/messages',
     allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
     transformation: [{ width: 1200, height: 1200, crop: 'limit', quality: 'auto' }],
   },
@@ -22,7 +22,7 @@ const chatImageStorage = new CloudinaryStorage({
 const avatarStorage = new CloudinaryStorage({
   cloudinary,
   params: {
-    folder: 'chattrix/avatars',
+    folder: 'nexchat/avatars',
     allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
     transformation: [{ width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto' }],
   },

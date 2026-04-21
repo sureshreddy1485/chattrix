@@ -56,7 +56,7 @@ app.use('/api/messages', messageRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', service: 'Chattrix Backend', time: new Date().toISOString() });
+  res.json({ status: 'OK', service: 'NexChat Backend', time: new Date().toISOString() });
 });
 
 // 404 handler
@@ -76,7 +76,7 @@ setIo(io); // Make io accessible to REST controllers for broadcasting
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Chattrix server running on port ${PORT}`);
+  console.log(`🚀 NexChat server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
