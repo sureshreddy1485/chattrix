@@ -96,6 +96,10 @@ const userSchema = new mongoose.Schema(
         type: String,
       },
     ],
+    statusEmoji: {
+      type: String,
+      default: '',
+    },
   },
   { timestamps: true }
 );

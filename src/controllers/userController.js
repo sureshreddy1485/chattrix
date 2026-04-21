@@ -38,14 +38,15 @@ const getUserById = async (req, res) => {
 // PUT /api/users/profile
 const updateProfile = async (req, res) => {
   try {
-    const { displayName, bio, interests, coverPhoto } = req.body;
+    const { displayName, bio, interests, coverPhoto, statusEmoji } = req.body;
     const userId = req.user._id;
-
+    
     const updateData = {};
     if (displayName !== undefined) updateData.displayName = displayName.trim();
     if (bio !== undefined) updateData.bio = bio.trim();
     if (interests !== undefined && Array.isArray(interests)) updateData.interests = interests;
     if (coverPhoto !== undefined) updateData.coverPhoto = coverPhoto;
+    if (statusEmoji !== undefined) updateData.statusEmoji = statusEmoji;
     if (req.file) updateData.avatar = req.file.path;
 
     const user = await User.findByIdAndUpdate(userId, updateData, { new: true });
