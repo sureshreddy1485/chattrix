@@ -219,13 +219,20 @@ const socketHandler = (io) => {
     // ─────────────────────────────────────────────────────────────────────
     socket.on('message:seen', async ({ messageId, conversationId }) => {
       try {
-        const message = await Message.findOneAndUpdate(
-          { _id: messageId, status: { $ne: 'seen' } },
-          { status: 'seen', $addToSet: { seenBy: userId } },
-          { new: true }
-        );
+        const message = await Message.findById(messageId);
+        if (!message) return;
 
-        if (message) {
+        // Check if user already in seenBy
+        const alreadySeen = message.seenBy.some(s => {
+          const id = s.userId ? s.userId.toString() : s.toString();
+          return id === userId;
+        });
+
+        if (!alreadySeen) {
+          message.seenBy.push({ userId, seenAt: new Date() });
+          message.status = 'seen';
+          await message.save();
+
           // Notify sender
           io.to(message.senderId.toString()).emit('message:seen', {
             messageId,

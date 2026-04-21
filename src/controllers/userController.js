@@ -42,17 +42,22 @@ const updateProfile = async (req, res) => {
     const userId = req.user._id;
     
     const updateData = {};
+    const currentUser = await User.findById(userId);
+    if (!currentUser) return res.status(404).json({ message: 'User not found' });
+
     if (firstName !== undefined) updateData.firstName = firstName.trim();
     if (lastName !== undefined) updateData.lastName = lastName.trim();
 
     // If first or last name is updated, also update displayName
     if (firstName !== undefined || lastName !== undefined) {
-      const user = await User.findById(userId);
-      const fName = firstName !== undefined ? firstName.trim() : (user.firstName || '');
-      const lName = lastName !== undefined ? lastName.trim() : (user.lastName || '');
-      updateData.displayName = `${fName} ${lName}`.trim();
-    } else if (displayName !== undefined) {
+      const fName = firstName !== undefined ? firstName.trim() : (currentUser.firstName || '');
+      const lName = lastName !== undefined ? lastName.trim() : (currentUser.lastName || '');
+      updateData.displayName = `${fName} ${lName}`.trim() || currentUser.username;
+    } else if (displayName !== undefined && displayName.trim()) {
       updateData.displayName = displayName.trim();
+    } else if (displayName !== undefined) {
+      // If someone tries to set an empty display name, fallback to username
+      updateData.displayName = currentUser.username;
     }
     if (bio !== undefined) updateData.bio = bio.trim();
     if (interests !== undefined && Array.isArray(interests)) updateData.interests = interests;
@@ -61,6 +66,19 @@ const updateProfile = async (req, res) => {
     if (req.file) updateData.avatar = req.file.path;
 
     const user = await User.findByIdAndUpdate(userId, updateData, { new: true });
+    
+    // Broadcast update to online contacts and group members
+    const { getIo } = require('../utils/ioInstance');
+    const io = getIo();
+    if (io) {
+      io.emit('user:updated', {
+        userId: user._id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+      });
+    }
+
     res.json(user);
   } catch (err) {
     console.error('updateProfile error:', err);

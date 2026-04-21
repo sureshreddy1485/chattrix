@@ -132,5 +132,24 @@ const searchMessages = async (req, res) => {
   }
 };
 
-module.exports = { getMessages, uploadImage, deleteMessage, searchMessages };
+// GET /api/messages/:id/info — get who read the message and when
+const getMessageInfo = async (req, res) => {
+  try {
+    const message = await Message.findById(req.params.id)
+      .populate('seenBy.userId', 'username displayName avatar')
+      .select('seenBy senderId');
+
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+
+    // Filter out any invalid entries (e.g. from before schema change) 
+    // and ensure userId is populated
+    const validSeenBy = message.seenBy.filter(s => s && s.userId);
+    
+    res.json(validSeenBy);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { getMessages, uploadImage, deleteMessage, searchMessages, getMessageInfo };
 
