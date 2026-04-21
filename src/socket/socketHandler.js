@@ -231,6 +231,7 @@ const socketHandler = (io) => {
         if (!alreadySeen) {
           message.seenBy.push({ userId, seenAt: new Date() });
           message.status = 'seen';
+          message.markModified('seenBy');
           await message.save();
 
           // Notify sender
