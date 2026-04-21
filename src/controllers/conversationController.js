@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const User = require('../models/User');
@@ -594,10 +595,49 @@ const unpinConversation = async (req, res) => {
   }
 };
 
+// DELETE /api/conversations/bulk — delete multiple conversations
+const bulkDeleteConversations = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) {
+      return res.status(400).json({ message: 'ids array required' });
+    }
+
+    const userId = req.user._id.toString();
+
+    for (const id of ids) {
+      try {
+        if (!mongoose.Types.ObjectId.isValid(id)) continue;
+
+        const conversation = await Conversation.findOne({ _id: id, participants: req.user._id });
+        if (conversation) {
+          if (conversation.participants.length <= 1) {
+            await Conversation.findByIdAndDelete(id);
+            await Message.deleteMany({ conversationId: id });
+          } else {
+            conversation.participants = conversation.participants.filter(
+              (p) => p.toString() !== userId
+            );
+            await conversation.save();
+          }
+        }
+      } catch (innerErr) {
+        console.error(`Error deleting conversation ${id}:`, innerErr);
+      }
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('bulkDeleteConversations error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getConversations,
   createOrGetConversation,
   deleteConversation,
+  bulkDeleteConversations,
   createGroupConversation,
   kickMember,
   makeAdmin,

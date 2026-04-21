@@ -18,6 +18,7 @@ const {
   leaveGroup,
   updateDmSetting,
   checkDmAllowed,
+  bulkDeleteConversations,
 } = require('../controllers/conversationController');
 const { authenticate } = require('../middleware/auth');
 const { uploadAvatar } = require('../config/cloudinary');
@@ -28,6 +29,7 @@ router.get('/', getConversations);
 router.get('/search/group', searchGroups);
 router.post('/', createOrGetConversation);
 router.post('/group', uploadAvatar, createGroupConversation);
+router.delete('/bulk', bulkDeleteConversations);
 router.delete('/:id', deleteConversation);
 router.put('/:id/kick', kickMember);
 router.put('/:id/admin', makeAdmin);
