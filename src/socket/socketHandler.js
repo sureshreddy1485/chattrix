@@ -97,6 +97,24 @@ const socketHandler = (io) => {
           if (ack) ack({ error: 'Conversation not found' });
           return;
         }
+        // ── Block Check (1-on-1 only) ─────────────────────────────────────
+        if (!conversation.isGroup) {
+          const myId = userId.toString();
+          const otherParticipant = conversation.participants.find(p => p.toString() !== myId);
+          if (otherParticipant) {
+            const otherUser = await User.findById(otherParticipant).select('blockedUsers');
+            if (otherUser && otherUser.blockedUsers.includes(myId)) {
+              if (ack) ack({ success: false, error: 'Blocked' });
+              return;
+            }
+            // Also check if I blocked them
+            const me = await User.findById(userId).select('blockedUsers');
+            if (me && me.blockedUsers.includes(otherParticipant.toString())) {
+              if (ack) ack({ success: false, error: 'You have blocked this user' });
+              return;
+            }
+          }
+        }
 
         // Encrypt content
         const encryptedContent = encrypt(content || '');
@@ -336,4 +354,22 @@ function safeDecrypt(encryptedContent) {
   }
 }
 
+/**
+ * Broadcast a system message to all participants currently in a conversation room.
+ * Call this from REST controllers after creating a system message.
+ */
+async function broadcastSystemMessage(io, conversationId, systemMsg) {
+  try {
+    const populated = await Message.findById(systemMsg._id).populate(
+      'senderId', 'username displayName avatar'
+    );
+    if (!populated) return;
+    const payload = { ...populated.toObject(), content: 'System Event' };
+    io.to(conversationId.toString()).emit('message:received', payload);
+  } catch (err) {
+    console.error('broadcastSystemMessage error:', err);
+  }
+}
+
 module.exports = socketHandler;
+module.exports.broadcastSystemMessage = broadcastSystemMessage;

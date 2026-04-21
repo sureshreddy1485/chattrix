@@ -24,8 +24,16 @@ const messageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['text', 'image', 'emoji'],
+      enum: ['text', 'image', 'emoji', 'system'],
       default: 'text',
+    },
+    // Only present when type === 'system'
+    systemEvent: {
+      action: { type: String, default: null },   // 'joined','added','promoted','demoted','removed','created'
+      actorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      targetId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      actorName: { type: String, default: null },
+      targetName: { type: String, default: null },
     },
     imageUrl: {
       type: String,

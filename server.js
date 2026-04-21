@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 
 const connectDB = require('./src/config/db');
 const socketHandler = require('./src/socket/socketHandler');
+const { setIo } = require('./src/utils/ioInstance');
 
 // Routes
 const authRoutes = require('./src/routes/auth');
@@ -71,6 +72,7 @@ app.use((err, req, res, next) => {
 
 // Initialize Socket.IO handler
 socketHandler(io);
+setIo(io); // Make io accessible to REST controllers for broadcasting
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

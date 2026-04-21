@@ -63,6 +63,13 @@ const conversationSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    // Pinned: set of userIds who pinned this conversation
+    pinnedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
   },
   { timestamps: true }
 );

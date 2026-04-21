@@ -4,7 +4,7 @@ const User = require('../models/User');
 const { validate } = require('../middleware/validate');
 
 const generateToken = (userId) =>
-  jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
+  jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '90d' });
 
 // ── Validation Chains ────────────────────────────────────────────────────────
 const signupValidation = [
@@ -88,6 +88,17 @@ const login = async (req, res) => {
 
 const getMe = async (req, res) => {
   res.json(req.user);
+};
+
+// POST /auth/refresh — issue a fresh token (call this on app resume)
+const refreshToken = async (req, res) => {
+  try {
+    // The authenticate middleware already verified the current token
+    const newToken = generateToken(req.user._id);
+    res.json({ token: newToken });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
 };
 
 const updatePushToken = async (req, res) => {
@@ -193,4 +204,5 @@ const resetPassword = async (req, res) => {
   }
 };
 
-module.exports = { signup, login, getMe, updatePushToken, changePassword, forgotPassword, resetPassword, signupValidation, loginValidation };
+module.exports = { signup, login, getMe, refreshToken, updatePushToken, changePassword, forgotPassword, resetPassword, signupValidation, loginValidation };
+

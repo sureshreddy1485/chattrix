@@ -80,6 +80,22 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    // Per-group DM privacy: array of { groupId, allowDm }
+    groupDmSettings: [
+      {
+        groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation' },
+        allowDm: { type: Boolean, default: true },
+      },
+    ],
+    coverPhoto: {
+      type: String,
+      default: null,
+    },
+    interests: [
+      {
+        type: String,
+      },
+    ],
   },
   { timestamps: true }
 );

@@ -1,12 +1,42 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
-const { decrypt } = require('../utils/encryption');
+const User = require('../models/User');
+const { decrypt, encrypt } = require('../utils/encryption');
+const { getIo } = require('../utils/ioInstance');
+const { broadcastSystemMessage } = require('../socket/socketHandler');
+
+// ── Helper: create and broadcast a system event message ──────────────────────
+const createSystemMessage = async (conversationId, action, actorId, actorName, targetId = null, targetName = null) => {
+  const content = 'System Event';
+  const encryptedContent = encrypt(content);
+  const msg = await Message.create({
+    conversationId,
+    senderId: actorId,
+    content,
+    encryptedContent,
+    type: 'system',
+    systemEvent: { action, actorId, targetId, actorName, targetName },
+  });
+  console.log(`[SYSTEM_MSG] Created ${action} for group ${conversationId}`);
+  await Conversation.findByIdAndUpdate(conversationId, {
+    lastMessage: msg._id,
+    updatedAt: new Date(),
+  });
+  // Broadcast to all online group members in real-time
+  const io = getIo();
+  if (io) {
+    console.log(`[SYSTEM_MSG] Broadcasting ${action} to group room`);
+    await broadcastSystemMessage(io, conversationId, msg);
+  }
+  return msg;
+};
+
 
 // GET /api/conversations — list all user's conversations with last message
 const getConversations = async (req, res) => {
   try {
     const conversations = await Conversation.find({ participants: req.user._id })
-      .populate('participants', 'username displayName avatar isOnline lastSeen')
+      .populate('participants', 'username displayName avatar isOnline lastSeen createdAt bio interests')
       .populate({
         path: 'lastMessage',
         populate: { path: 'senderId', select: 'username displayName' },
@@ -49,7 +79,7 @@ const createOrGetConversation = async (req, res) => {
     let conversation = await Conversation.findOne({
       isGroup: false,
       participants: { $all: [myId, theirId], $size: 2 },
-    }).populate('participants', 'username displayName avatar isOnline lastSeen');
+    }).populate('participants', 'username displayName avatar isOnline lastSeen createdAt bio interests');
 
     if (!conversation) {
       conversation = await Conversation.create({
@@ -58,7 +88,7 @@ const createOrGetConversation = async (req, res) => {
       });
       conversation = await conversation.populate(
         'participants',
-        'username displayName avatar isOnline lastSeen'
+        'username displayName avatar isOnline lastSeen createdAt bio interests'
       );
     }
 
@@ -109,7 +139,7 @@ const createGroupConversation = async (req, res) => {
     // Check if groupUsername is taken
     const existingUsername = await Conversation.findOne({ groupUsername: groupUsername.trim().toLowerCase() });
     if (existingUsername) {
-      return res.status(400).json({ message: 'Group username is already deeply taken' });
+      return res.status(400).json({ message: 'Group username is already taken' });
     }
 
     let conversation = await Conversation.create({
@@ -117,13 +147,18 @@ const createGroupConversation = async (req, res) => {
       isGroup: true,
       groupName: groupName.trim(),
       groupUsername: groupUsername.trim().toLowerCase(),
+      groupAvatar: req.file ? req.file.path : null,
       createdBy: myId,
       admins: [myId],
     });
 
+    // System message: group created
+    const actorName = req.user.displayName || req.user.username;
+    await createSystemMessage(conversation._id, 'created', myId, actorName, null, groupName.trim());
+
     conversation = await conversation.populate(
       'participants',
-      'username displayName avatar isOnline lastSeen'
+      'username displayName avatar isOnline lastSeen interests'
     );
 
     res.json(conversation);
@@ -133,85 +168,103 @@ const createGroupConversation = async (req, res) => {
   }
 };
 
-// PUT /api/conversations/:id/kick — Kick a member correctly
+// PUT /api/conversations/:id/kick — Kick a member
 const kickMember = async (req, res) => {
   try {
     const { id } = req.params;
     const { targetUserId } = req.body;
-    
+
     if (!targetUserId) return res.status(400).json({ message: 'targetUserId required' });
 
     const conversation = await Conversation.findById(id);
-    if (!conversation || !conversation.isGroup) return res.status(404).json({ message: 'Group deeply not found' });
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ message: 'Group not found' });
 
     const requesterId = req.user._id.toString();
     const isOwner = conversation.createdBy.toString() === requesterId;
     const isAdmin = conversation.admins.map(id => id.toString()).includes(requesterId);
     const isTargetOwner = conversation.createdBy.toString() === targetUserId;
 
-    if (!isOwner && !isAdmin) return res.status(403).json({ message: 'Insufficient purely admin rights' });
-    if (isTargetOwner) return res.status(403).json({ message: 'Cannot inherently kick Owner' });
+    if (!isOwner && !isAdmin) return res.status(403).json({ message: 'Insufficient admin rights' });
+    if (isTargetOwner) return res.status(403).json({ message: 'Cannot kick the Owner' });
 
     conversation.participants = conversation.participants.filter(p => p.toString() !== targetUserId);
     conversation.admins = conversation.admins.filter(a => a.toString() !== targetUserId);
     await conversation.save();
-    
-    res.json({ success: true });
+
+    // System message: actor removed target
+    const target = await User.findById(targetUserId).select('displayName username');
+    const actorName = req.user.displayName || req.user.username;
+    const targetName = target?.displayName || target?.username || 'Someone';
+    const sysMsg = await createSystemMessage(id, 'removed', requesterId, actorName, targetUserId, targetName);
+
+    res.json({ success: true, systemMessage: sysMsg });
   } catch(err) {
     console.error('kickMember Error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// PUT /api/conversations/:id/admin — Make Admin directly
+// PUT /api/conversations/:id/admin — Make Admin
 const makeAdmin = async (req, res) => {
   try {
     const { id } = req.params;
     const { targetUserId } = req.body;
-    
-    if (!targetUserId) return res.status(400).json({ message: 'targetUserId seamlessly required' });
+
+    if (!targetUserId) return res.status(400).json({ message: 'targetUserId required' });
 
     const conversation = await Conversation.findById(id);
-    if (!conversation || !conversation.isGroup) return res.status(404).json({ message: 'Group not found natively' });
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ message: 'Group not found' });
 
     const requesterId = req.user._id.toString();
     const isOwner = conversation.createdBy.toString() === requesterId;
     const isAdmin = conversation.admins.map(id => id.toString()).includes(requesterId);
 
-    if (!isOwner && !isAdmin) return res.status(403).json({ message: 'Only strictly Admins or Owners can explicitly promote' });
+    if (!isOwner && !isAdmin) return res.status(403).json({ message: 'Only Admins or Owners can promote' });
 
     if (!conversation.admins.map(a => a.toString()).includes(targetUserId)) {
       conversation.admins.push(targetUserId);
       await conversation.save();
     }
-    
-    res.json({ success: true });
+
+    // System message: actor promoted target
+    const target = await User.findById(targetUserId).select('displayName username');
+    const actorName = req.user.displayName || req.user.username;
+    const targetName = target?.displayName || target?.username || 'Someone';
+    const sysMsg = await createSystemMessage(id, 'promoted', requesterId, actorName, targetUserId, targetName);
+
+    res.json({ success: true, systemMessage: sysMsg });
   } catch(err) {
     console.error('makeAdmin Error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// PUT /api/conversations/:id/revoke-admin — Revoke purely cleanly securely
+// PUT /api/conversations/:id/revoke-admin — Revoke admin
 const revokeAdmin = async (req, res) => {
   try {
     const { id } = req.params;
     const { targetUserId } = req.body;
-    
-    if (!targetUserId) return res.status(400).json({ message: 'targetUserId cleanly required' });
+
+    if (!targetUserId) return res.status(400).json({ message: 'targetUserId required' });
 
     const conversation = await Conversation.findById(id);
-    if (!conversation || !conversation.isGroup) return res.status(404).json({ message: 'Group completely not found' });
+    if (!conversation || !conversation.isGroup) return res.status(404).json({ message: 'Group not found' });
 
     const requesterId = req.user._id.toString();
     const isOwner = conversation.createdBy.toString() === requesterId;
 
-    if (!isOwner) return res.status(403).json({ message: 'Only strictly flawlessly Owners safely can perfectly revoke admins' });
+    if (!isOwner) return res.status(403).json({ message: 'Only Owners can revoke admins' });
 
     conversation.admins = conversation.admins.filter(a => a.toString() !== targetUserId);
     await conversation.save();
-    
-    res.json({ success: true });
+
+    // System message: actor demoted target
+    const target = await User.findById(targetUserId).select('displayName username');
+    const actorName = req.user.displayName || req.user.username;
+    const targetName = target?.displayName || target?.username || 'Someone';
+    const sysMsg = await createSystemMessage(id, 'demoted', requesterId, actorName, targetUserId, targetName);
+
+    res.json({ success: true, systemMessage: sysMsg });
   } catch(err) {
     console.error('revokeAdmin Error:', err);
     res.status(500).json({ message: 'Server error' });
@@ -223,13 +276,12 @@ const searchGroups = async (req, res) => {
   try {
     const query = req.query.q;
     if (!query) return res.json([]);
-    
-    const groups = await Conversation.find({ 
-      isGroup: true, 
-      groupUsername: { $regex: query, $options: 'i' } 
+
+    const groups = await Conversation.find({
+      isGroup: true,
+      groupUsername: { $regex: query, $options: 'i' }
     }).select('groupName groupUsername groupAvatar participants createdBy admins');
-    
-    // Provide member count simply dynamically
+
     const result = groups.map(g => {
       const obj = g.toObject();
       obj.memberCount = g.participants.length;
@@ -241,7 +293,7 @@ const searchGroups = async (req, res) => {
     console.error('searchGroups error:', err);
     res.status(500).json({ message: 'Server error' });
   }
-}
+};
 
 // PUT /api/conversations/:id/update — update group name, description, avatar
 const updateGroup = async (req, res) => {
@@ -262,15 +314,41 @@ const updateGroup = async (req, res) => {
       return res.status(403).json({ message: 'Only admins can update group details' });
     }
 
+    const oldName = conversation.groupName;
+    const nameChanged = groupName !== undefined && groupName.trim() !== oldName;
+    const avatarChanged = !!req.file;
+
     if (groupName !== undefined) conversation.groupName = groupName.trim().slice(0, 50);
     if (groupDescription !== undefined) conversation.groupDescription = groupDescription.trim().slice(0, 300);
-    if (groupAvatar !== undefined) conversation.groupAvatar = groupAvatar;
+    
+    if (req.file) {
+      conversation.groupAvatar = req.file.path;
+    } else if (groupAvatar !== undefined) {
+      conversation.groupAvatar = groupAvatar;
+    }
 
     await conversation.save();
 
     const updated = await Conversation.findById(id).populate(
-      'participants', 'username displayName avatar isOnline lastSeen'
+      'participants', 'username displayName avatar isOnline lastSeen interests'
     );
+
+    // ── Real-time Updates ───────────────────────────────────────────────
+    const io = getIo();
+    const actorName = req.user.displayName || req.user.username;
+
+    if (nameChanged) {
+      const msg = await createSystemMessage(id, 'renamed', requesterId, actorName, null, conversation.groupName);
+      broadcastSystemMessage(io, id, msg);
+    }
+
+    if (avatarChanged) {
+      const msg = await createSystemMessage(id, 'updated_avatar', requesterId, actorName, null, 'group picture');
+      broadcastSystemMessage(io, id, msg);
+    }
+
+    // Notify all participants to refresh their chat list/UI
+    io.to(id).emit('conversation:updated', updated);
 
     res.json(updated);
   } catch (err) {
@@ -279,7 +357,7 @@ const updateGroup = async (req, res) => {
   }
 };
 
-// PUT /api/conversations/:id/mute — mute conversation for this user
+// PUT /api/conversations/:id/mute
 const muteConversation = async (req, res) => {
   try {
     const conversation = await Conversation.findOneAndUpdate(
@@ -294,7 +372,7 @@ const muteConversation = async (req, res) => {
   }
 };
 
-// PUT /api/conversations/:id/unmute — unmute conversation for this user
+// PUT /api/conversations/:id/unmute
 const unmuteConversation = async (req, res) => {
   try {
     const conversation = await Conversation.findOneAndUpdate(
@@ -309,7 +387,7 @@ const unmuteConversation = async (req, res) => {
   }
 };
 
-// PUT /api/conversations/:id/members/add — add members to group
+// PUT /api/conversations/:id/members/add — add members (or self-join)
 const addMembers = async (req, res) => {
   try {
     const { id } = req.params;
@@ -333,19 +411,43 @@ const addMembers = async (req, res) => {
       return res.status(403).json({ message: 'Only admins can add members' });
     }
 
+    const addedUsers = [];
     for (const uid of userIds) {
       if (!conversation.participants.map(p => p.toString()).includes(uid)) {
         conversation.participants.push(uid);
+        addedUsers.push(uid);
       }
     }
 
     await conversation.save();
 
+    // Create system messages for each newly added user
+    const sysMsgs = [];
+    const actorName = req.user.displayName || req.user.username;
+
+    for (const uid of addedUsers) {
+      let action, targetName;
+      if (isSelfJoin) {
+        // Self-join: "X joined the group"
+        action = 'joined';
+        targetName = actorName;
+        const sysMsg = await createSystemMessage(id, action, requesterId, actorName, uid, targetName);
+        sysMsgs.push(sysMsg);
+      } else {
+        // Admin added: "X added Y"
+        action = 'added';
+        const target = await User.findById(uid).select('displayName username');
+        targetName = target?.displayName || target?.username || 'Someone';
+        const sysMsg = await createSystemMessage(id, action, requesterId, actorName, uid, targetName);
+        sysMsgs.push(sysMsg);
+      }
+    }
+
     const updated = await Conversation.findById(id).populate(
-      'participants', 'username displayName avatar isOnline lastSeen'
+      'participants', 'username displayName avatar isOnline lastSeen interests'
     );
 
-    res.json(updated);
+    res.json({ ...updated.toObject(), systemMessages: sysMsgs });
   } catch (err) {
     console.error('addMembers error:', err);
     res.status(500).json({ message: 'Server error' });
@@ -365,31 +467,29 @@ const leaveGroup = async (req, res) => {
     const requesterId = req.user._id.toString();
     const isOwner = conversation.createdBy.toString() === requesterId;
 
-    // If owner leaves, transfer ownership
     if (isOwner) {
-      // Try to find another admin first
       const nextAdmin = conversation.admins.find(a => a.toString() !== requesterId);
       const nextMember = conversation.participants.find(p => p.toString() !== requesterId);
       const newOwner = nextAdmin || nextMember;
 
       if (!newOwner) {
-        // Last member leaving — delete group
         await Conversation.findByIdAndDelete(id);
         return res.json({ success: true, deleted: true });
       }
 
       conversation.createdBy = newOwner;
-      // Make new owner an admin too if not already
       if (!conversation.admins.map(a => a.toString()).includes(newOwner.toString())) {
         conversation.admins.push(newOwner);
       }
     }
 
-    // Remove self from participants and admins
+    // System message: X left the group
+    const actorName = req.user.displayName || req.user.username;
+    await createSystemMessage(id, 'left', requesterId, actorName, requesterId, actorName);
+
     conversation.participants = conversation.participants.filter(p => p.toString() !== requesterId);
     conversation.admins = conversation.admins.filter(a => a.toString() !== requesterId);
 
-    // If last participant left
     if (conversation.participants.length === 0) {
       await Conversation.findByIdAndDelete(id);
       return res.json({ success: true, deleted: true });
@@ -403,10 +503,91 @@ const leaveGroup = async (req, res) => {
   }
 };
 
-module.exports = { 
-  getConversations, 
-  createOrGetConversation, 
-  deleteConversation, 
+// PUT /api/conversations/:id/dm-setting — toggle DM preference for current user in this group
+const updateDmSetting = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { allowDm } = req.body;
+
+    if (typeof allowDm !== 'boolean') {
+      return res.status(400).json({ message: 'allowDm (boolean) required' });
+    }
+
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Upsert the groupDmSetting entry
+    const idx = user.groupDmSettings.findIndex(s => s.groupId.toString() === id);
+    if (idx > -1) {
+      user.groupDmSettings[idx].allowDm = allowDm;
+    } else {
+      user.groupDmSettings.push({ groupId: id, allowDm });
+    }
+    await user.save();
+
+    res.json({ success: true, allowDm });
+  } catch (err) {
+    console.error('updateDmSetting error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// GET /api/conversations/:id/dm-allowed/:userId — check if user allows DMs in this group
+const checkDmAllowed = async (req, res) => {
+  try {
+    const { id: groupId, userId: targetUserId } = req.params;
+
+    const target = await User.findById(targetUserId).select('groupDmSettings username');
+    if (!target) return res.status(404).json({ message: 'User not found' });
+
+    const setting = target.groupDmSettings.find(s => s.groupId.toString() === groupId);
+    // Default is true (allow) if no setting exists
+    const allowDm = setting ? setting.allowDm : true;
+
+    res.json({ allowDm, username: target.username });
+  } catch (err) {
+    console.error('checkDmAllowed error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// PUT /api/conversations/:id/pin
+const pinConversation = async (req, res) => {
+  try {
+    const conversation = await Conversation.findOneAndUpdate(
+      { _id: req.params.id, participants: req.user._id },
+      { $addToSet: { pinnedBy: req.user._id } },
+      { new: true }
+    ).populate('participants', 'username displayName avatar isOnline lastSeen interests');
+    
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    res.json(conversation);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// PUT /api/conversations/:id/unpin
+const unpinConversation = async (req, res) => {
+  try {
+    const conversation = await Conversation.findOneAndUpdate(
+      { _id: req.params.id, participants: req.user._id },
+      { $pull: { pinnedBy: req.user._id } },
+      { new: true }
+    ).populate('participants', 'username displayName avatar isOnline lastSeen interests');
+    
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+    res.json(conversation);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = {
+  getConversations,
+  createOrGetConversation,
+  deleteConversation,
   createGroupConversation,
   kickMember,
   makeAdmin,
@@ -415,6 +596,10 @@ module.exports = {
   updateGroup,
   muteConversation,
   unmuteConversation,
+  pinConversation,
+  unpinConversation,
   addMembers,
   leaveGroup,
+  updateDmSetting,
+  checkDmAllowed,
 };
