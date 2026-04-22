@@ -643,7 +643,7 @@ const setDisappearingMode = async (req, res) => {
     const { id } = req.params;
     const { mode } = req.body;
 
-    if (!['off', '24h_seen', '24h', '7d'].includes(mode)) {
+    if (!['off', 'seen', '24h_seen', '7d_seen'].includes(mode)) {
       return res.status(400).json({ message: 'Invalid mode' });
     }
 
