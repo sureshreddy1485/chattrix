@@ -78,6 +78,11 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 NexChat server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Start background cleanup task
+  const { cleanupExpiredMessages } = require('./src/utils/cleanup');
+  setInterval(cleanupExpiredMessages, 60000); // Run every 60 seconds
+  console.log('🧹 Background cleanup task started');
 });
 
 module.exports = { app, server, io };

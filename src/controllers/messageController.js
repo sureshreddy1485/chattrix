@@ -103,6 +103,11 @@ const deleteMessage = async (req, res) => {
         return res.status(403).json({ message: 'Unauthorized to delete for everyone' });
       }
 
+      if (message.imageUrl) {
+        const { deleteFromCloudinary } = require('../config/cloudinary');
+        await deleteFromCloudinary(message.imageUrl);
+      }
+
       await Message.findByIdAndDelete(req.params.id);
 
       // Broadcast deletion via socket
