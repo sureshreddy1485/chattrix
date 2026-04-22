@@ -144,17 +144,14 @@ const socketHandler = (io) => {
           isLive: !!isLive,
         });
 
-        // Update conversation's last message
-        await Conversation.findByIdAndUpdate(conversationId, {
-          lastMessage: message._id,
-          updatedAt: new Date(),
-        });
-
-        // Populate sender for response
-        const populatedMsg = await Message.findById(message._id).populate(
-          'senderId',
-          'username displayName avatar'
-        );
+        // Parallelize initial updates
+        const [populatedMsg] = await Promise.all([
+          Message.findById(message._id).populate('senderId', 'username displayName avatar'),
+          Conversation.findByIdAndUpdate(conversationId, {
+            lastMessage: message._id,
+            updatedAt: new Date(),
+          })
+        ]);
 
         const msgPayload = {
           ...populatedMsg.toObject(),
@@ -168,7 +165,7 @@ const socketHandler = (io) => {
           conversationId,
           status: 'sent',
           timestamp: message.createdAt,
-          tempId: data.tempId, // echo back client temp ID for optimistic updates
+          tempId: data.tempId,
         });
 
         if (ack) ack({ success: true, messageId: message._id });
@@ -178,15 +175,18 @@ const socketHandler = (io) => {
           (p) => p.toString() !== userId
         );
 
-        for (const recipientId of recipientIds) {
-          const recipientIdStr = recipientId.toString();
-          const recipient = await User.findById(recipientId).select('isOnline pushToken username');
+        // Bulk fetch all recipients at once
+        const recipients = await User.find({ _id: { $in: recipientIds } }).select('isOnline pushToken username');
+        
+        // Prepare delivery promises
+        const deliveryPromises = recipients.map(async (recipient) => {
+          const recipientIdStr = recipient._id.toString();
 
-          // Increment unread count
+          // Increment unread count in the existing conversation object
           const currentCount = conversation.unreadCount.get(recipientIdStr) || 0;
           conversation.unreadCount.set(recipientIdStr, currentCount + 1);
 
-          // Determine if the recipient is actively viewing this specific chat room
+          // Determine if viewing
           const recipientSockets = io.sockets.adapter.rooms.get(recipientIdStr);
           const conversationRoom = io.sockets.adapter.rooms.get(conversationId.toString());
           
@@ -200,30 +200,22 @@ const socketHandler = (io) => {
             }
           }
 
-          // Always emit via socket (for chat list updates and foreground delivery)
+          // Emit via socket
           io.to(recipientIdStr).emit('message:received', msgPayload);
 
           if (isActivelyViewing) {
-            // Actively viewing: update status to delivered immediately
+            // Update status to delivered
             await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
-            
-            // Notify sender of delivery
-            socket.emit('message:delivered', {
-              messageId: message._id,
-              conversationId,
-            });
+            socket.emit('message:delivered', { messageId: message._id, conversationId });
           } else {
-            // Not actively viewing (Background, Offline, or Other Chat): Send Push
-            const isMuted = conversation.mutedBy?.some(
-              (uid) => uid.toString() === recipientIdStr
-            );
-
+            // Send Push
+            const isMuted = conversation.mutedBy?.some((uid) => uid.toString() === recipientIdStr);
             if (recipient.pushToken && !isMuted) {
               const notifBody = type === 'image' ? '📷 Photo' : content;
               const senderName = socket.user.displayName || socket.user.username;
               const title = conversation.isGroup ? `${conversation.groupName} (${senderName})` : senderName;
 
-              await sendPushNotification(recipient.pushToken, {
+              sendPushNotification(recipient.pushToken, {
                 title,
                 body: notifBody,
                 data: {
@@ -235,9 +227,10 @@ const socketHandler = (io) => {
               });
             }
           }
-        }
+        });
 
-        await conversation.save(); // save unread counts
+        await Promise.all(deliveryPromises);
+        await conversation.save(); // Save all unread counts at once
       } catch (err) {
         console.error('message:send error:', err);
         if (ack) ack({ error: 'Failed to send message' });
