@@ -677,9 +677,9 @@ const setDisappearingMode = async (req, res) => {
       const actorName = req.user.displayName || req.user.username;
       const modeLabels = {
         'off': 'off',
-        '24h_seen': '24 hours after seen',
-        '24h': '1 day',
-        '7d': '7 days'
+        'seen': 'after seen',
+        '24h_seen': '24h seen',
+        '7d_seen': '7d seen'
       };
       await createSystemMessage(id, 'disappearing_changed', req.user._id, actorName, null, modeLabels[mode]);
     }

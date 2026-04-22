@@ -74,17 +74,43 @@ const uploadImage = async (req, res) => {
   });
 };
 
-// DELETE /api/messages/:id — delete message for self
+// DELETE /api/messages/:id?type=self|everyone
 const deleteMessage = async (req, res) => {
   try {
+    const { type = 'self' } = req.query;
     const message = await Message.findById(req.params.id);
     if (!message) return res.status(404).json({ message: 'Message not found' });
 
-    message.deletedFor.addToSet(req.user._id);
-    await message.save();
+    if (type === 'everyone') {
+      const conversation = await Conversation.findById(message.conversationId);
+      const isSender = message.senderId.toString() === req.user._id.toString();
+      const isAdmin = conversation?.isGroup && conversation.admins.some(a => a.toString() === req.user._id.toString());
+      const isOwner = conversation?.isGroup && conversation.createdBy.toString() === req.user._id.toString();
+
+      if (!isSender && !isAdmin && !isOwner) {
+        return res.status(403).json({ message: 'Unauthorized to delete for everyone' });
+      }
+
+      await Message.findByIdAndDelete(req.params.id);
+
+      // Broadcast deletion via socket
+      const { getIo } = require('../utils/ioInstance');
+      const io = getIo();
+      if (io) {
+        io.to(message.conversationId.toString()).emit('message:deleted', {
+          messageId: message._id,
+          conversationId: message.conversationId,
+        });
+      }
+    } else {
+      // Delete for self only
+      message.deletedFor.addToSet(req.user._id);
+      await message.save();
+    }
 
     res.json({ success: true });
   } catch (err) {
+    console.error('deleteMessage error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };

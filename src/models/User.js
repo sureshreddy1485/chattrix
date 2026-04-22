@@ -112,6 +112,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    showLiveTab: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );

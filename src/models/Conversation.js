@@ -72,7 +72,7 @@ const conversationSchema = new mongoose.Schema(
     ],
     disappearingMode: {
       type: String,
-      enum: ['off', '24h_seen', '24h', '7d'],
+      enum: ['off', 'seen', '24h_seen', '7d_seen'],
       default: 'off',
     },
   },

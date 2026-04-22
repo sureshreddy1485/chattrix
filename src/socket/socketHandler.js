@@ -122,13 +122,7 @@ const socketHandler = (io) => {
         // ── Handle Disappearing Messages ──────────────────────────────────
         let expiresAt = null;
         let isDisappearing = false;
-        if (conversation.disappearingMode === '24h') {
-          expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-          isDisappearing = true;
-        } else if (conversation.disappearingMode === '7d') {
-          expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-          isDisappearing = true;
-        } else if (conversation.disappearingMode === '24h_seen') {
+        if (conversation.disappearingMode && conversation.disappearingMode !== 'off') {
           isDisappearing = true;
           // expiresAt will be set when marked as seen
         }
@@ -263,15 +257,21 @@ const socketHandler = (io) => {
             conv.unreadCount.set(userId, 0);
             await conv.save();
 
-            if (conv.disappearingMode === '24h_seen' && !message.expiresAt) {
-              message.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-              await message.save();
+            if (conv.disappearingMode && conv.disappearingMode !== 'off' && !message.expiresAt) {
+              let ttl = 0;
+              if (conv.disappearingMode === 'seen') ttl = 10 * 1000; // 10 seconds
+              else if (conv.disappearingMode === '24h_seen') ttl = 24 * 60 * 60 * 1000;
+              else if (conv.disappearingMode === '7d_seen') ttl = 7 * 24 * 60 * 60 * 1000;
               
-              // Notify others of updated expiry if needed (client can also handle this if they know the mode)
-              io.to(conversationId).emit('message:expiry_updated', {
-                messageId: message._id,
-                expiresAt: message.expiresAt,
-              });
+              if (ttl > 0) {
+                message.expiresAt = new Date(Date.now() + ttl);
+                await message.save();
+                
+                io.to(conversationId).emit('message:expiry_updated', {
+                  messageId: message._id,
+                  expiresAt: message.expiresAt,
+                });
+              }
             }
           }
         }

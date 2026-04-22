@@ -38,7 +38,7 @@ const getUserById = async (req, res) => {
 // PUT /api/users/profile
 const updateProfile = async (req, res) => {
   try {
-    const { displayName, firstName, lastName, bio, interests, coverPhoto, statusEmoji } = req.body;
+    const { displayName, firstName, lastName, bio, interests, coverPhoto, statusEmoji, showLiveTab } = req.body;
     const userId = req.user._id;
     
     const updateData = {};
@@ -63,6 +63,7 @@ const updateProfile = async (req, res) => {
     if (interests !== undefined && Array.isArray(interests)) updateData.interests = interests;
     if (coverPhoto !== undefined) updateData.coverPhoto = coverPhoto;
     if (statusEmoji !== undefined) updateData.statusEmoji = statusEmoji;
+    if (showLiveTab !== undefined) updateData.showLiveTab = showLiveTab;
     if (req.file) {
       // Delete old avatar if it exists
       if (currentUser.avatar) {
