@@ -1,5 +1,5 @@
 const User = require('../models/User');
-const { uploadAvatar } = require('../config/cloudinary');
+const { uploadAvatar, deleteFromCloudinary } = require('../config/cloudinary');
 
 // GET /api/users/search?q=username
 const searchUsers = async (req, res) => {
@@ -63,7 +63,13 @@ const updateProfile = async (req, res) => {
     if (interests !== undefined && Array.isArray(interests)) updateData.interests = interests;
     if (coverPhoto !== undefined) updateData.coverPhoto = coverPhoto;
     if (statusEmoji !== undefined) updateData.statusEmoji = statusEmoji;
-    if (req.file) updateData.avatar = req.file.path;
+    if (req.file) {
+      // Delete old avatar if it exists
+      if (currentUser.avatar) {
+        await deleteFromCloudinary(currentUser.avatar);
+      }
+      updateData.avatar = req.file.path;
+    }
 
     const user = await User.findByIdAndUpdate(userId, updateData, { new: true });
     
@@ -189,7 +195,12 @@ const getBlockedUsers = async (req, res) => {
 const deleteAccount = async (req, res) => {
   try {
     const userId = req.user._id;
-    await User.findByIdAndDelete(userId);
+    const user = await User.findById(userId);
+    if (user) {
+      if (user.avatar) await deleteFromCloudinary(user.avatar);
+      if (user.coverPhoto) await deleteFromCloudinary(user.coverPhoto);
+      await User.findByIdAndDelete(userId);
+    }
     
     // Remove from conversations
     const Conversation = require('../models/Conversation');

@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { decrypt, encrypt } = require('../utils/encryption');
 const { getIo } = require('../utils/ioInstance');
 const { broadcastSystemMessage } = require('../socket/socketHandler');
+const { deleteFromCloudinary } = require('../config/cloudinary');
 
 // ── Helper: create and broadcast a system event message ──────────────────────
 const createSystemMessage = async (conversationId, action, actorId, actorName, targetId = null, targetName = null) => {
@@ -333,6 +334,9 @@ const updateGroup = async (req, res) => {
     if (groupDescription !== undefined) conversation.groupDescription = groupDescription.trim().slice(0, 300);
     
     if (req.file) {
+      if (conversation.groupAvatar) {
+        await deleteFromCloudinary(conversation.groupAvatar);
+      }
       conversation.groupAvatar = req.file.path;
     } else if (groupAvatar !== undefined) {
       conversation.groupAvatar = groupAvatar;
@@ -633,6 +637,60 @@ const bulkDeleteConversations = async (req, res) => {
   }
 };
 
+// PUT /api/conversations/:id/disappearing
+const setDisappearingMode = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mode } = req.body;
+
+    if (!['off', '24h_seen', '24h', '7d'].includes(mode)) {
+      return res.status(400).json({ message: 'Invalid mode' });
+    }
+
+    const conversation = await Conversation.findById(id);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+
+    // For groups, check if admin
+    if (conversation.isGroup) {
+      const requesterId = req.user._id.toString();
+      const isAdmin = conversation.admins.map(a => a.toString()).includes(requesterId);
+      const isOwner = conversation.createdBy.toString() === requesterId;
+      if (!isAdmin && !isOwner) {
+        return res.status(403).json({ message: 'Only admins can change this setting' });
+      }
+    } else {
+      // For 1-on-1, check if participant
+      if (!conversation.participants.map(p => p.toString()).includes(req.user._id.toString())) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+    }
+
+    conversation.disappearingMode = mode;
+    await conversation.save();
+
+    // Broadcast change
+    const io = getIo();
+    if (io) {
+      io.to(id).emit('conversation:disappearing_mode', { conversationId: id, mode });
+      
+      // System message
+      const actorName = req.user.displayName || req.user.username;
+      const modeLabels = {
+        'off': 'off',
+        '24h_seen': '24 hours after seen',
+        '24h': '1 day',
+        '7d': '7 days'
+      };
+      await createSystemMessage(id, 'disappearing_changed', req.user._id, actorName, null, modeLabels[mode]);
+    }
+
+    res.json({ success: true, mode });
+  } catch (err) {
+    console.error('setDisappearingMode error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getConversations,
   createOrGetConversation,
@@ -652,4 +710,5 @@ module.exports = {
   leaveGroup,
   updateDmSetting,
   checkDmAllowed,
+  setDisappearingMode,
 };

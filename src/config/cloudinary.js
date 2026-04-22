@@ -38,4 +38,26 @@ const uploadAvatar = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 }).single('avatar');
 
-module.exports = { cloudinary, uploadChatImage, uploadAvatar };
+const deleteFromCloudinary = async (identifier) => {
+  try {
+    if (!identifier) return;
+    let publicId = identifier;
+    if (identifier.startsWith('http')) {
+      // Extract public ID from URL: nexchat/avatars/abc123...
+      const parts = identifier.split('/');
+      const folderIdx = parts.findIndex(p => p === 'nexchat');
+      if (folderIdx > -1) {
+        // e.g. nexchat/avatars/filename.jpg -> nexchat/avatars/filename
+        const relevantParts = parts.slice(folderIdx);
+        const lastPart = relevantParts[relevantParts.length - 1].split('.')[0];
+        relevantParts[relevantParts.length - 1] = lastPart;
+        publicId = relevantParts.join('/');
+      }
+    }
+    await cloudinary.uploader.destroy(publicId);
+  } catch (err) {
+    console.error('Cloudinary Delete Error:', err);
+  }
+};
+
+module.exports = { cloudinary, uploadChatImage, uploadAvatar, deleteFromCloudinary };

@@ -70,6 +70,11 @@ const conversationSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    disappearingMode: {
+      type: String,
+      enum: ['off', '24h_seen', '24h', '7d'],
+      default: 'off',
+    },
   },
   { timestamps: true }
 );

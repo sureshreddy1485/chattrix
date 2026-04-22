@@ -19,6 +19,7 @@ const {
   updateDmSetting,
   checkDmAllowed,
   bulkDeleteConversations,
+  setDisappearingMode,
 } = require('../controllers/conversationController');
 const { authenticate } = require('../middleware/auth');
 const { uploadAvatar } = require('../config/cloudinary');
@@ -43,5 +44,6 @@ router.put('/:id/members/add', addMembers);
 router.put('/:id/leave', leaveGroup);
 router.put('/:id/dm-setting', updateDmSetting);
 router.get('/:id/dm-allowed/:userId', checkDmAllowed);
+router.put('/:id/disappearing', setDisappearingMode);
 
 module.exports = router;

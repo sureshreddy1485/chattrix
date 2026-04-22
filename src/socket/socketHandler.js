@@ -119,6 +119,20 @@ const socketHandler = (io) => {
         // Encrypt content
         const encryptedContent = encrypt(content || '');
 
+        // ── Handle Disappearing Messages ──────────────────────────────────
+        let expiresAt = null;
+        let isDisappearing = false;
+        if (conversation.disappearingMode === '24h') {
+          expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          isDisappearing = true;
+        } else if (conversation.disappearingMode === '7d') {
+          expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+          isDisappearing = true;
+        } else if (conversation.disappearingMode === '24h_seen') {
+          isDisappearing = true;
+          // expiresAt will be set when marked as seen
+        }
+
         // Save message to DB
         const message = await Message.create({
           conversationId,
@@ -128,6 +142,8 @@ const socketHandler = (io) => {
           type,
           imageUrl: imageUrl || null,
           status: 'sent',
+          isDisappearing,
+          expiresAt,
         });
 
         // Update conversation's last message
@@ -241,11 +257,22 @@ const socketHandler = (io) => {
             seenBy: userId,
           });
 
-          // Reset unread count for this user
+          // Handle 24h_seen disappearing mode
           const conv = await Conversation.findById(conversationId);
           if (conv) {
             conv.unreadCount.set(userId, 0);
             await conv.save();
+
+            if (conv.disappearingMode === '24h_seen' && !message.expiresAt) {
+              message.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+              await message.save();
+              
+              // Notify others of updated expiry if needed (client can also handle this if they know the mode)
+              io.to(conversationId).emit('message:expiry_updated', {
+                messageId: message._id,
+                expiresAt: message.expiresAt,
+              });
+            }
           }
         }
       } catch (err) {
