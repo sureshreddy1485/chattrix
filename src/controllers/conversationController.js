@@ -153,13 +153,27 @@ const createGroupConversation = async (req, res) => {
       return res.status(400).json({ message: 'Valid groupName, groupUsername, and at least one participant required' });
     }
 
+    const gUsername = groupUsername.trim().toLowerCase();
+    
+    // Validate groupUsername rules
+    if (gUsername.length < 3 || gUsername.length > 20) {
+      return res.status(400).json({ message: 'Group username must be 3–20 characters' });
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(gUsername)) {
+      return res.status(400).json({ message: 'Group username can only contain letters, numbers, and underscores' });
+    }
+
     const myId = req.user._id.toString();
     const allParticipantIds = [...new Set([myId, ...participantIds])];
 
-    // Check if groupUsername is taken
-    const existingUsername = await Conversation.findOne({ groupUsername: groupUsername.trim().toLowerCase() });
-    if (existingUsername) {
-      return res.status(400).json({ message: 'Group username is already taken' });
+    // Check if groupUsername is taken (also check User model to avoid overlap)
+    const [existingConv, existingUser] = await Promise.all([
+      Conversation.findOne({ groupUsername: gUsername }),
+      User.findOne({ username: gUsername })
+    ]);
+
+    if (existingConv || existingUser) {
+      return res.status(400).json({ message: 'Username is already taken' });
     }
 
     let conversation = await Conversation.create({
