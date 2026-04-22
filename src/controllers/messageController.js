@@ -11,17 +11,29 @@ const getMessages = async (req, res) => {
     const limit = parseInt(req.query.limit) || 30;
     const skip = (page - 1) * limit;
 
-    // Verify user is in this conversation
-    const conversation = await Conversation.findOne({
-      _id: conversationId,
-      participants: req.user._id,
-    });
-    if (!conversation) return res.status(403).json({ message: 'Access denied' });
+    // Verify user is in this conversation (now or in the past)
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
 
-    const messages = await Message.find({
+    const userId = req.user._id.toString();
+    const isActive = conversation.participants.some(p => p.toString() === userId);
+    const removedEntry = conversation.removedParticipants.find(p => p.userId.toString() === userId);
+
+    if (!isActive && !removedEntry) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const messageQuery = {
       conversationId,
       deletedFor: { $ne: req.user._id },
-    })
+    };
+
+    // If they were removed, only show messages from BEFORE they were removed
+    if (!isActive && removedEntry) {
+      messageQuery.createdAt = { $lt: removedEntry.removedAt };
+    }
+
+    const messages = await Message.find(messageQuery)
       .populate('senderId', 'username displayName avatar')
       .sort({ createdAt: -1 })
       .skip(skip)

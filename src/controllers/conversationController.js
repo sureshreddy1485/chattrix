@@ -37,7 +37,12 @@ const createSystemMessage = async (conversationId, action, actorId, actorName, t
 // GET /api/conversations — list all user's conversations with last message
 const getConversations = async (req, res) => {
   try {
-    const conversations = await Conversation.find({ participants: req.user._id })
+    const conversations = await Conversation.find({
+      $or: [
+        { participants: req.user._id },
+        { "removedParticipants.userId": req.user._id }
+      ]
+    })
       .populate('participants', 'username displayName avatar isOnline lastSeen createdAt bio interests')
       .populate({
         path: 'lastMessage',
@@ -207,6 +212,13 @@ const kickMember = async (req, res) => {
 
     conversation.participants = conversation.participants.filter(p => p.toString() !== targetUserId);
     conversation.admins = conversation.admins.filter(a => a.toString() !== targetUserId);
+    
+    // Add to removedParticipants for history retention
+    const alreadyRemoved = conversation.removedParticipants.some(p => p.userId.toString() === targetUserId);
+    if (!alreadyRemoved) {
+      conversation.removedParticipants.push({ userId: targetUserId, removedAt: new Date() });
+    }
+
     await conversation.save();
 
     // System message: actor removed target
@@ -533,6 +545,12 @@ const leaveGroup = async (req, res) => {
     conversation.participants = conversation.participants.filter(p => p.toString() !== requesterId);
     conversation.admins = conversation.admins.filter(a => a.toString() !== requesterId);
 
+    // Add to removedParticipants for history retention
+    const alreadyRemoved = conversation.removedParticipants.some(p => p.userId.toString() === requesterId);
+    if (!alreadyRemoved) {
+      conversation.removedParticipants.push({ userId: requesterId, removedAt: new Date() });
+    }
+
     if (conversation.participants.length === 0) {
       await Conversation.findByIdAndDelete(id);
       return res.json({ success: true, deleted: true });
@@ -692,18 +710,14 @@ const setDisappearingMode = async (req, res) => {
     const conversation = await Conversation.findById(id);
     if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
 
-    // For groups, check if admin
+    const userId = req.user._id.toString();
+    const isOwner = conversation.createdBy.toString() === userId;
+    const isAdmin = conversation.admins.map(a => a.toString()).includes(userId);
+
+    // Check permissions
     if (conversation.isGroup) {
-      const requesterId = req.user._id.toString();
-      const isAdmin = conversation.admins.map(a => a.toString()).includes(requesterId);
-      const isOwner = conversation.createdBy.toString() === requesterId;
       if (!isAdmin && !isOwner) {
-        return res.status(403).json({ message: 'Only admins can change this setting' });
-      }
-    } else {
-      // For 1-on-1, check if participant
-      if (!conversation.participants.map(p => p.toString()).includes(req.user._id.toString())) {
-        return res.status(403).json({ message: 'Access denied' });
+        return res.status(403).json({ message: 'Only admins can change disappearing messages' });
       }
     }
 
@@ -723,7 +737,7 @@ const setDisappearingMode = async (req, res) => {
         '24h_seen': '24h seen',
         '7d_seen': '7d seen'
       };
-      await createSystemMessage(id, 'disappearing_changed', req.user._id, actorName, null, modeLabels[mode]);
+      await createSystemMessage(id, 'disappearing_changed', userId, actorName, null, modeLabels[mode]);
     }
 
     res.json({ success: true, mode });

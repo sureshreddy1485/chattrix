@@ -122,9 +122,11 @@ const socketHandler = (io) => {
         // ── Handle Disappearing Messages ──────────────────────────────────
         let expiresAt = null;
         let isDisappearing = false;
+        let msgDisappearingMode = 'off';
+
         if (conversation.disappearingMode && conversation.disappearingMode !== 'off') {
           isDisappearing = true;
-          // expiresAt will be set when marked as seen
+          msgDisappearingMode = conversation.disappearingMode;
         }
 
         // Save message to DB
@@ -137,6 +139,7 @@ const socketHandler = (io) => {
           imageUrl: imageUrl || null,
           status: 'sent',
           isDisappearing,
+          disappearingMode: msgDisappearingMode,
           expiresAt,
         });
 
@@ -181,29 +184,45 @@ const socketHandler = (io) => {
           const currentCount = conversation.unreadCount.get(recipientIdStr) || 0;
           conversation.unreadCount.set(recipientIdStr, currentCount + 1);
 
-          if (recipient.isOnline) {
-            // User is online — deliver immediately
-            io.to(recipientIdStr).emit('message:received', msgPayload);
+          // Determine if the recipient is actively viewing this specific chat room
+          const recipientSockets = io.sockets.adapter.rooms.get(recipientIdStr);
+          const conversationRoom = io.sockets.adapter.rooms.get(conversationId.toString());
+          
+          let isActivelyViewing = false;
+          if (recipientSockets && conversationRoom) {
+            for (const sid of recipientSockets) {
+              if (conversationRoom.has(sid)) {
+                isActivelyViewing = true;
+                break;
+              }
+            }
+          }
 
-            // Update status to delivered
+          // Always emit via socket (for chat list updates and foreground delivery)
+          io.to(recipientIdStr).emit('message:received', msgPayload);
+
+          if (isActivelyViewing) {
+            // Actively viewing: update status to delivered immediately
             await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
-
+            
             // Notify sender of delivery
             socket.emit('message:delivered', {
               messageId: message._id,
               conversationId,
             });
           } else {
-            // User is offline — send push only if not muted
+            // Not actively viewing (Background, Offline, or Other Chat): Send Push
             const isMuted = conversation.mutedBy?.some(
               (uid) => uid.toString() === recipientIdStr
             );
 
             if (recipient.pushToken && !isMuted) {
-              const notifBody =
-                type === 'image' ? '📷 Photo' : type === 'emoji' ? content : content;
+              const notifBody = type === 'image' ? '📷 Photo' : content;
+              const senderName = socket.user.displayName || socket.user.username;
+              const title = conversation.isGroup ? `${conversation.groupName} (${senderName})` : senderName;
+
               await sendPushNotification(recipient.pushToken, {
-                title: socket.user.displayName || socket.user.username,
+                title,
                 body: notifBody,
                 data: {
                   type: 'new_message',
@@ -257,11 +276,12 @@ const socketHandler = (io) => {
             conv.unreadCount.set(userId, 0);
             await conv.save();
 
-            if (conv.disappearingMode && conv.disappearingMode !== 'off' && !message.expiresAt) {
+            const mode = message.disappearingMode;
+            if (mode && mode !== 'off' && !message.expiresAt) {
               let ttl = 0;
-              if (conv.disappearingMode === 'seen') ttl = 10 * 1000; // 10 seconds
-              else if (conv.disappearingMode === '24h_seen') ttl = 24 * 60 * 60 * 1000;
-              else if (conv.disappearingMode === '7d_seen') ttl = 7 * 24 * 60 * 60 * 1000;
+              if (mode === 'seen') ttl = 10 * 1000; // 10 seconds
+              else if (mode === '24h_seen') ttl = 24 * 60 * 60 * 1000;
+              else if (mode === '7d_seen') ttl = 7 * 24 * 60 * 60 * 1000;
               
               if (ttl > 0) {
                 message.expiresAt = new Date(Date.now() + ttl);

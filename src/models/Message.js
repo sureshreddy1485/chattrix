@@ -61,6 +61,11 @@ const messageSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    disappearingMode: {
+      type: String,
+      enum: ['off', 'seen', '24h_seen', '7d_seen'],
+      default: 'off',
+    },
     expiresAt: {
       type: Date,
       default: null,

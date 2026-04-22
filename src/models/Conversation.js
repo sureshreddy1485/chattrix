@@ -75,6 +75,19 @@ const conversationSchema = new mongoose.Schema(
       enum: ['off', 'seen', '24h_seen', '7d_seen'],
       default: 'off',
     },
+    // Track participants who were removed or left to allow them to see history
+    removedParticipants: [
+      {
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        removedAt: { type: Date, default: Date.now },
+      },
+    ],
+    // Individual disappearing settings (used if global disappearingMode is 'off')
+    personalDisappearingModes: {
+      type: Map,
+      of: String, // 'off', 'seen', '24h_seen', '7d_seen'
+      default: {},
+    },
   },
   { timestamps: true }
 );
