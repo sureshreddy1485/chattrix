@@ -10,8 +10,8 @@ const generateToken = (userId) =>
 const signupValidation = [
   body('username')
     .trim()
-    .isLength({ min: 3, max: 20 })
-    .withMessage('Username must be 3–20 characters')
+    .isLength({ min: 6, max: 20 })
+    .withMessage('Username must be 6–20 characters')
     .matches(/^[a-zA-Z0-9_]+$/)
     .withMessage('Username can only contain letters, numbers, and underscores'),
   body('email')

@@ -156,8 +156,8 @@ const createGroupConversation = async (req, res) => {
     const gUsername = groupUsername.trim().toLowerCase();
     
     // Validate groupUsername rules
-    if (gUsername.length < 3 || gUsername.length > 20) {
-      return res.status(400).json({ message: 'Group username must be 3–20 characters' });
+    if (gUsername.length < 6 || gUsername.length > 20) {
+      return res.status(400).json({ message: 'Group username must be 6–20 characters' });
     }
     if (!/^[a-zA-Z0-9_]+$/.test(gUsername)) {
       return res.status(400).json({ message: 'Group username can only contain letters, numbers, and underscores' });
