@@ -92,6 +92,11 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    secretPin: {
+      type: String,
+      required: [true, 'Secret PIN is required for account recovery'],
+      select: false,
+    },
     // Per-group DM privacy: array of { groupId, allowDm }
     groupDmSettings: [
       {

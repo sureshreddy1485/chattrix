@@ -14,10 +14,21 @@ const signupValidation = [
     .withMessage('Username must be 3–20 characters')
     .matches(/^[a-zA-Z0-9_]+$/)
     .withMessage('Username can only contain letters, numbers, and underscores'),
-  body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+  body('email')
+    .isEmail()
+    .withMessage('Please provide a valid email address')
+    .normalizeEmail()
+    .custom((value) => {
+      if (!value.endsWith('@gmail.com')) {
+        throw new Error('Only Gmail addresses are accepted at this time');
+      }
+      return true;
+    }),
   body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters'),
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters long')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/)
+    .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&#)'),
   body('displayName').optional().trim().isLength({ max: 50 }),
   validate,
 ];
@@ -31,7 +42,11 @@ const loginValidation = [
 // ── Controllers ───────────────────────────────────────────────────────────────
 const signup = async (req, res) => {
   try {
-    const { username, email, password, displayName } = req.body;
+    const { username, email, password, displayName, secretPin } = req.body;
+
+    if (!secretPin || secretPin.length < 4) {
+      return res.status(400).json({ message: 'Secret PIN (min 4 digits) is required for recovery' });
+    }
 
     // Check uniqueness
     const existingUsername = await User.findOne({ username: username.toLowerCase() });
@@ -49,6 +64,7 @@ const signup = async (req, res) => {
       email: email.toLowerCase(),
       displayName: displayName?.trim() || username,
       passwordHash: password,
+      secretPin,
     });
 
     const token = generateToken(user._id);
@@ -77,7 +93,6 @@ const login = async (req, res) => {
     }
 
     const token = generateToken(user._id);
-    // Return user without passwordHash (toJSON handles this)
     const userObj = user.toJSON();
     res.json({ token, user: userObj });
   } catch (err) {
@@ -90,10 +105,8 @@ const getMe = async (req, res) => {
   res.json(req.user);
 };
 
-// POST /auth/refresh — issue a fresh token (call this on app resume)
 const refreshToken = async (req, res) => {
   try {
-    // The authenticate middleware already verified the current token
     const newToken = generateToken(req.user._id);
     res.json({ token: newToken });
   } catch (err) {
@@ -117,8 +130,11 @@ const changePassword = async (req, res) => {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: 'Current and new passwords are required' });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    
+    // Check new password complexity manually here too just in case
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ message: 'New password must contain uppercase, lowercase, number and special character' });
     }
 
     const user = await User.findById(req.user._id).select('+passwordHash');
@@ -130,7 +146,7 @@ const changePassword = async (req, res) => {
     }
 
     user.passwordHash = newPassword;
-    await user.save(); // Triggers the schema pre-save hook to hash the new password
+    await user.save();
 
     res.json({ message: 'Password changed successfully' });
   } catch (err) {
@@ -146,25 +162,21 @@ const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      // Return 200 even if user not found for security purposes
-      return res.json({ message: 'If an account exists, a reset code was sent.' });
+      return res.json({ message: 'If an account exists, instructions were sent.' });
     }
 
-    // Generate 6 digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Save to user with 15min expiry
     user.resetPasswordOTP = otp;
     user.resetPasswordExpires = Date.now() + 15 * 60 * 1000;
     await user.save();
 
-    // In a real app we would email this OTP. For dev, log it clearly!
     console.log('\n=======================================');
-    console.log(`🔐 PASSWORD RESET OTP FOR ${user.email} 🔐`);
-    console.log(`CODE: ${otp}`);
+    console.log(`🔐 PASSWORD RESET FOR ${user.email} 🔐`);
+    console.log(`OTP (Legacy): ${otp}`);
+    console.log(`NOTE: User can also use their Secret PIN to reset.`);
     console.log('=======================================\n');
 
-    res.json({ message: 'If an account exists, a reset code was sent.' });
+    res.json({ message: 'Password reset initiated. Use your OTP or Secret PIN to proceed.' });
   } catch (err) {
     console.error('Forgot password error:', err);
     res.status(500).json({ message: 'Server error' });
@@ -173,31 +185,39 @@ const forgotPassword = async (req, res) => {
 
 const resetPassword = async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({ message: 'Email, OTP, and new password are required' });
-    }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'New password must be at least 6 characters' });
+    const { email, otp, pin, newPassword } = req.body;
+    if (!email || (!otp && !pin) || !newPassword) {
+      return res.status(400).json({ message: 'Email, recovery code (OTP/PIN), and new password are required' });
     }
 
-    const user = await User.findOne({ 
-      email: email.toLowerCase(),
-      resetPasswordOTP: otp,
-      resetPasswordExpires: { $gt: Date.now() }
-    }).select('+resetPasswordOTP +resetPasswordExpires +passwordHash');
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ message: 'New password must contain uppercase, lowercase, number and special character' });
+    }
 
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+resetPasswordOTP +resetPasswordExpires +secretPin +passwordHash');
     if (!user) {
-      return res.status(400).json({ message: 'Invalid or expired reset code' });
+      return res.status(404).json({ message: 'User not found' });
     }
 
-    // Update password
+    // Verify recovery code
+    let isValid = false;
+    if (otp && user.resetPasswordOTP === otp && user.resetPasswordExpires > Date.now()) {
+      isValid = true;
+    } else if (pin && user.secretPin === pin) {
+      isValid = true;
+    }
+
+    if (!isValid) {
+      return res.status(400).json({ message: 'Invalid or expired recovery code/PIN' });
+    }
+
     user.passwordHash = newPassword;
     user.resetPasswordOTP = null;
     user.resetPasswordExpires = null;
     await user.save();
 
-    res.json({ message: 'Password has been reset seamlessly. You may now login.' });
+    res.json({ message: 'Password reset successfully' });
   } catch (err) {
     console.error('Reset password error:', err);
     res.status(500).json({ message: 'Server error' });
