@@ -173,6 +173,12 @@ const createGroupConversation = async (req, res) => {
       'username displayName avatar isOnline lastSeen interests'
     );
 
+    // ── Real-time Updates ───────────────────────────────────────────────
+    const io = getIo();
+    for (const pid of allParticipantIds) {
+      io.to(pid.toString()).emit('conversation:new', conversation);
+    }
+
     res.json(conversation);
   } catch (err) {
     console.error('createGroupConversation error:', err);
@@ -208,6 +214,18 @@ const kickMember = async (req, res) => {
     const actorName = req.user.displayName || req.user.username;
     const targetName = target?.displayName || target?.username || 'Someone';
     const sysMsg = await createSystemMessage(id, 'removed', requesterId, actorName, targetUserId, targetName);
+
+    // ── Real-time Updates ───────────────────────────────────────────────
+    const io = getIo();
+    // Notify the kicked user to remove the conversation from their list
+    io.to(targetUserId.toString()).emit('conversation:removed', { conversationId: id });
+    
+    const updated = await Conversation.findById(id).populate(
+      'participants', 'username displayName avatar isOnline lastSeen interests'
+    );
+    // Notify remaining members
+    io.to(id).emit('conversation:updated', updated);
+    broadcastSystemMessage(io, id, sysMsg);
 
     res.json({ success: true, systemMessage: sysMsg });
   } catch(err) {
@@ -462,6 +480,16 @@ const addMembers = async (req, res) => {
       'participants', 'username displayName avatar isOnline lastSeen interests'
     );
 
+    // ── Real-time Updates ───────────────────────────────────────────────
+    const io = getIo();
+    for (const uid of addedUsers) {
+      io.to(uid.toString()).emit('conversation:new', updated);
+    }
+    io.to(id).emit('conversation:updated', updated);
+    for (const msg of sysMsgs) {
+      broadcastSystemMessage(io, id, msg);
+    }
+
     res.json({ ...updated.toObject(), systemMessages: sysMsgs });
   } catch (err) {
     console.error('addMembers error:', err);
@@ -511,6 +539,20 @@ const leaveGroup = async (req, res) => {
     }
 
     await conversation.save();
+
+    // ── Real-time Updates ───────────────────────────────────────────────
+    const io = getIo();
+    // Notify the person who left (or was removed) to clear their chat list
+    io.to(requesterId).emit('conversation:removed', { conversationId: id });
+    
+    // Notify the rest of the group members about the update
+    const updated = await Conversation.findById(id).populate(
+      'participants', 'username displayName avatar isOnline lastSeen interests'
+    );
+    if (updated) {
+      io.to(id).emit('conversation:updated', updated);
+    }
+
     res.json({ success: true, deleted: false });
   } catch (err) {
     console.error('leaveGroup error:', err);
