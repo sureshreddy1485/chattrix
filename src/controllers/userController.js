@@ -5,16 +5,15 @@ const { uploadAvatar, deleteFromCloudinary } = require('../config/cloudinary');
 const searchUsers = async (req, res) => {
   try {
     const { q } = req.query;
-    if (!q || q.trim().length < 2) {
-      return res.status(400).json({ message: 'Search query too short' });
+    if (!q) {
+      return res.status(400).json({ message: 'Search query required' });
     }
 
     const users = await User.find({
-      username: { $regex: q.trim(), $options: 'i' },
+      username: q.trim().toLowerCase(),
       _id: { $ne: req.user._id },
     })
-      .select('username displayName avatar isOnline lastSeen interests')
-      .limit(20);
+      .select('username displayName avatar isOnline lastSeen interests');
 
     res.json(users);
   } catch (err) {

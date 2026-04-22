@@ -338,7 +338,7 @@ const searchGroups = async (req, res) => {
 
     const groups = await Conversation.find({
       isGroup: true,
-      groupUsername: { $regex: query, $options: 'i' }
+      groupUsername: query.trim().toLowerCase()
     }).select('groupName groupUsername groupAvatar participants createdBy admins');
 
     const result = groups.map(g => {
