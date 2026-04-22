@@ -117,6 +117,9 @@ const deleteConversation = async (req, res) => {
 
     // Remove user from participants (soft delete) or remove conversation if last participant
     if (conversation.participants.length <= 1) {
+      if (conversation.groupAvatar) {
+        await deleteFromCloudinary(conversation.groupAvatar);
+      }
       await Conversation.findByIdAndDelete(req.params.id);
       await Message.deleteMany({ conversationId: req.params.id });
     } else {
@@ -552,6 +555,9 @@ const leaveGroup = async (req, res) => {
     }
 
     if (conversation.participants.length === 0) {
+      if (conversation.groupAvatar) {
+        await deleteFromCloudinary(conversation.groupAvatar);
+      }
       await Conversation.findByIdAndDelete(id);
       return res.json({ success: true, deleted: true });
     }
@@ -676,6 +682,9 @@ const bulkDeleteConversations = async (req, res) => {
         const conversation = await Conversation.findOne({ _id: id, participants: req.user._id });
         if (conversation) {
           if (conversation.participants.length <= 1) {
+            if (conversation.groupAvatar) {
+              await deleteFromCloudinary(conversation.groupAvatar);
+            }
             await Conversation.findByIdAndDelete(id);
             await Message.deleteMany({ conversationId: id });
           } else {

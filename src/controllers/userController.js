@@ -61,7 +61,12 @@ const updateProfile = async (req, res) => {
     }
     if (bio !== undefined) updateData.bio = bio.trim();
     if (interests !== undefined && Array.isArray(interests)) updateData.interests = interests;
-    if (coverPhoto !== undefined) updateData.coverPhoto = coverPhoto;
+    if (coverPhoto !== undefined) {
+      if (currentUser.coverPhoto && currentUser.coverPhoto !== coverPhoto) {
+        await deleteFromCloudinary(currentUser.coverPhoto);
+      }
+      updateData.coverPhoto = coverPhoto;
+    }
     if (statusEmoji !== undefined) updateData.statusEmoji = statusEmoji;
     if (showLiveTab !== undefined) updateData.showLiveTab = showLiveTab;
     if (req.file) {
