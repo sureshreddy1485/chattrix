@@ -126,19 +126,24 @@ const updatePushToken = async (req, res) => {
 
 const changePassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ message: 'Current and new passwords are required' });
+    const { currentPassword, newPassword, pin } = req.body;
+    if (!currentPassword || !newPassword || !pin) {
+      return res.status(400).json({ message: 'Current password, new password, and Secret PIN are required' });
     }
     
-    // Check new password complexity manually here too just in case
+    // Check new password complexity
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$/;
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({ message: 'New password must contain uppercase, lowercase, number and special character' });
     }
 
-    const user = await User.findById(req.user._id).select('+passwordHash');
+    const user = await User.findById(req.user._id).select('+passwordHash +secretPin');
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Verify PIN
+    if (user.secretPin !== pin) {
+      return res.status(401).json({ message: 'Incorrect Secret PIN' });
+    }
 
     const isMatch = await user.comparePassword(currentPassword);
     if (!isMatch) {
