@@ -80,7 +80,7 @@ const socketHandler = (io) => {
     // ─────────────────────────────────────────────────────────────────────
     socket.on('message:send', async (data, ack) => {
       try {
-        const { conversationId, content, type = 'text', imageUrl } = data;
+        const { conversationId, content, type = 'text', imageUrl, isLive } = data;
 
         if (!conversationId || (!content && !imageUrl)) {
           if (ack) ack({ error: 'Invalid message data' });
@@ -141,6 +141,7 @@ const socketHandler = (io) => {
           isDisappearing,
           disappearingMode: msgDisappearingMode,
           expiresAt,
+          isLive: !!isLive,
         });
 
         // Update conversation's last message
@@ -158,6 +159,7 @@ const socketHandler = (io) => {
         const msgPayload = {
           ...populatedMsg.toObject(),
           content: content || '',
+          isLive: !!isLive,
         };
 
         // Confirm to sender immediately
